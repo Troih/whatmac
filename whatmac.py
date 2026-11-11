@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
-"""whatmac - visa en MAC-adress i alla vanliga format och slå upp tillverkaren.
+"""whatmac - show a MAC address in every common format and look up the vendor.
 
-Användning:
+Usage:
     whatmac aa:bb:cc:dd:ee:ff
     whatmac aabb.ccdd.eeff
-    whatmac --update        # ladda ner IEEE:s OUI-lista på nytt
+    whatmac --update        # re-download the IEEE OUI list
 """
 
-import json
 import re
 import sys
 import time
@@ -19,7 +18,7 @@ CACHE_DIR = Path.home() / ".cache" / "whatmac"
 OUI_FILE = CACHE_DIR / "oui.txt"
 OUI_URL = "https://standards-oui.ieee.org/oui/oui.txt"
 API_URL = "https://api.macvendors.com/{}"
-MAX_CACHE_AGE = 30 * 24 * 3600  # 30 dagar
+MAX_CACHE_AGE = 30 * 24 * 3600  # 30 days
 
 BOLD = "\033[1m"
 DIM = "\033[2m"
@@ -34,10 +33,10 @@ if not sys.stdout.isatty():
 
 
 def normalize(raw: str) -> str:
-    """Returnera 12 hex-tecken (versaler) eller kasta ValueError."""
+    """Return 12 uppercase hex characters or raise ValueError."""
     hexstr = re.sub(r"[^0-9a-fA-F]", "", raw)
     if len(hexstr) != 12 or re.search(r"[^0-9a-fA-F:\-.\s]", raw):
-        raise ValueError(f"Ogiltig MAC-adress: {raw!r}")
+        raise ValueError(f"Invalid MAC address: {raw!r}")
     return hexstr.upper()
 
 
@@ -46,25 +45,25 @@ def formats(mac: str) -> list[tuple[str, str]]:
     pairs = [mac[i:i + 2] for i in range(0, 12, 2)]
     quads = [lo[i:i + 4] for i in range(0, 12, 4)]
     return [
-        ("Kolon (Linux/macOS)", ":".join(pairs).lower()),
-        ("Kolon versaler", ":".join(pairs)),
-        ("Bindestreck (Windows)", "-".join(pairs)),
+        ("Colon (Linux/macOS)", ":".join(pairs).lower()),
+        ("Colon uppercase", ":".join(pairs)),
+        ("Hyphen (Windows)", "-".join(pairs)),
         ("Cisco", ".".join(quads)),
         ("HP / Aruba", "-".join(quads)),
-        ("Bara hex", lo),
-        ("Bara hex versaler", mac),
+        ("Plain hex", lo),
+        ("Plain hex uppercase", mac),
     ]
 
 
 def download_oui() -> bool:
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    print(f"{DIM}Laddar ner OUI-databas från IEEE...{RESET}", file=sys.stderr)
+    print(f"{DIM}Downloading OUI database from IEEE...{RESET}", file=sys.stderr)
     req = urllib.request.Request(OUI_URL, headers={"User-Agent": "Mozilla/5.0 whatmac"})
     try:
         with urllib.request.urlopen(req, timeout=30) as resp:
             data = resp.read()
     except (urllib.error.URLError, TimeoutError) as e:
-        print(f"{YELLOW}Kunde inte ladda ner OUI-listan: {e}{RESET}", file=sys.stderr)
+        print(f"{YELLOW}Could not download the OUI list: {e}{RESET}", file=sys.stderr)
         return False
     tmp = OUI_FILE.with_suffix(".tmp")
     tmp.write_bytes(data)
@@ -73,7 +72,7 @@ def download_oui() -> bool:
 
 
 def lookup_local(mac: str) -> tuple[str, str] | None:
-    """Slå upp i IEEE:s lista. Returnerar (tillverkare, adress) eller None."""
+    """Look up in the IEEE list. Returns (vendor, address) or None."""
     if not OUI_FILE.exists() or time.time() - OUI_FILE.stat().st_mtime > MAX_CACHE_AGE:
         if not download_oui() and not OUI_FILE.exists():
             return None
@@ -105,15 +104,15 @@ def describe_bits(mac: str) -> list[str]:
     first = int(mac[:2], 16)
     notes = []
     if mac == "FFFFFFFFFFFF":
-        notes.append("Broadcast-adress")
+        notes.append("Broadcast address")
     elif first & 0x01:
-        notes.append("Multicast-adress")
+        notes.append("Multicast address")
     else:
         notes.append("Unicast")
     if first & 0x02:
-        notes.append("Lokalt administrerad (troligen slumpad/privat MAC, t.ex. iPhone/Android/Windows)")
+        notes.append("Locally administered (likely a randomized/private MAC, e.g. iPhone/Android/Windows)")
     else:
-        notes.append("Globalt unik (tillverkartilldelad)")
+        notes.append("Globally unique (assigned by manufacturer)")
     return notes
 
 
@@ -124,17 +123,17 @@ def show(raw: str) -> int:
         print(f"{RED}{e}{RESET}")
         return 1
 
-    print(f"\n{BOLD}MAC-adress:{RESET} {CYAN}{raw}{RESET}\n")
+    print(f"\n{BOLD}MAC address:{RESET} {CYAN}{raw}{RESET}\n")
     for name, value in formats(mac):
         print(f"  {DIM}{name:<22}{RESET} {GREEN}{value}{RESET}")
 
-    print(f"\n{BOLD}Typ:{RESET}")
+    print(f"\n{BOLD}Type:{RESET}")
     for note in describe_bits(mac):
         print(f"  • {note}")
 
-    print(f"\n{BOLD}Tillverkare:{RESET}")
+    print(f"\n{BOLD}Vendor:{RESET}")
     if int(mac[:2], 16) & 0x02:
-        print(f"  {YELLOW}Okänd – lokalt administrerade adresser har ingen registrerad tillverkare.{RESET}")
+        print(f"  {YELLOW}Unknown – locally administered addresses have no registered vendor.{RESET}")
     else:
         found = lookup_local(mac)
         if found:
@@ -147,7 +146,7 @@ def show(raw: str) -> int:
             if vendor:
                 print(f"  {GREEN}{vendor}{RESET} {DIM}(via macvendors.com){RESET}")
             else:
-                print(f"  {YELLOW}Hittades inte (OUI {mac[:2]}:{mac[2:4]}:{mac[4:6]}){RESET}")
+                print(f"  {YELLOW}Not found (OUI {mac[:2]}:{mac[2:4]}:{mac[4:6]}){RESET}")
     print()
     return 0
 
@@ -159,7 +158,7 @@ def main() -> int:
         return 0
     if args[0] in ("-u", "--update"):
         return 0 if download_oui() else 1
-    # Tillåt både "whatmac aa bb cc dd ee ff" och flera adresser
+    # Accept both "whatmac aa bb cc dd ee ff" and multiple addresses
     joined = " ".join(args)
     try:
         normalize(joined)
